@@ -1,0 +1,345 @@
+# require("landsat")
+# require("raster")
+# require("magrittr")
+#TO DO!!! include possibility to work starting from raster
+#function to read the metadata
+
+read_lsat_metadata <- function(directory_path = "./tmp", pattern = "_MTL"){
+  #TO DO: eventually a different entry for the function such as file path
+  meta_data <- readLines(list.files(directory_path, pattern, full.names = TRUE), skipNul = T)
+  require("stringr")
+  groups <- grep("GROUP =", meta_data)[-1]
+  groups <- groups[-length(groups)]
+  meta_data_names <- sapply(strsplit(meta_data[groups[seq(1, length(groups), 2)]], "= "), function(x) x[2])
+  meta_data <- Map(function(x, y) meta_data[(groups[x]+1) : (groups[y]-1)], seq(1, length(groups), 2), seq(2, length(groups), 2))
+  meta_data <- lapply(meta_data, function(x) gsub("\\s+|\"", "", x, perl = TRUE))
+  meta_data <- lapply(meta_data, function(x) {
+    x <- str_split(x, "=", simplify = T)
+    x <- data.frame("field" = x[,1], "value" = x[,2], stringsAsFactors = FALSE)
+    x
+  })
+  names(meta_data) <- meta_data_names
+  return(meta_data)
+}
+
+#function to check if the product type is of a defined format (I want to use only L1T)
+#this return true if it is of the corresponding type
+check_lsat_type <- function(meta_data, type = "L1T"){
+  if(length(meta_data$PRODUCT_METADATA[meta_data$PRODUCT_METADATA$field == "DATA_TYPE", "value"]) == 0){
+  meta_data$PRODUCT_METADATA[meta_data$PRODUCT_METADATA$field == "PRODUCT_TYPE", "value"] == type
+  } else {
+    meta_data$PRODUCT_METADATA[meta_data$PRODUCT_METADATA$field == "DATA_TYPE", "value"] == type
+    }
+}
+
+#TO DO: r
+pixel_georef_error <- function(gcp = "./tmp/L71042035_03520030415_GCP.txt", val = 15, return_gcp = FALSE){
+  gcp <- readLines(gcp)
+  header <- read.csv(text = gcp, skip = grep("Point_ID", gcp)-1, 
+                     nrow = 1, header = F, stringsAsFactors = F)
+  header <- gsub("[[:digit:]]|\\s+", ";", header[1,1], perl = TRUE)
+  header <- strsplit(header, ";")
+  gcp <- gsub("\\s+", ";", gcp, perl = TRUE)
+  gcp <- read.csv(text = gcp, skip = grep("meters", gcp)-1, sep = ";", stringsAsFactors = FALSE)
+  colnames(gcp) <- make.unique(header[[1]])
+  if(return_gcp) return(gcp)
+  mean(abs(gcp$Residual)) > val & mean(abs(gcp$Residual.1)) > val
+}
+
+extract_radiometric_params <- function(meta_data){
+require("stringr")
+
+params <- rbind(meta_data[["MIN_MAX_RADIANCE"]], meta_data[["MIN_MAX_PIXEL_VALUE"]])
+#TO CHECK: band names should be consistent across meta_data files
+params$field <- gsub("_|VCID", "", params$field)
+params$band <- str_split(params$field, "BAND", simplify = TRUE)[,2]
+params$var <- str_split(params$field, "BAND", simplify = TRUE)[,1]
+params$value <- as.numeric(params$value)
+params$var <- gsub("RADIANCE", "L", params$var)
+params$var <- gsub("QUANTIZE", "Q", params$var)
+params$var <- gsub("MAXIMUM", "MAX", params$var)
+params$var <- gsub("MINIMUM", "MIN", params$var)
+params <- params[c(4,3,2)]
+return(params)
+}
+
+extract_band_names <- function(directory_path = "./tmp"){
+  require(stringr)
+  scenes <- data.frame("scenes" = list.files(directory_path, pattern = ".TIF", full.names = T), stringsAsFactors = FALSE)
+  scenes$bands <- str_split(scenes$scenes, "_B", simplify = TRUE)[,2]
+  scenes$bands <- str_split(scenes$bands, "0", simplify = TRUE)[,1]
+  scenes$bands <- gsub(".TIF", "", scenes$bands)
+  
+  #TO DO: you could eventually rewrite this more concisely
+  scenes$bands[grep("(?=.*6)(?=.*1)", scenes$bands, perl = T)] <- "61"
+  scenes$bands[grep("(?=.*6)(?=.*2)", scenes$bands, perl = T)] <- "62"
+  scenes$bands[grep("(?=.*8)(?=.*1)", scenes$bands, perl = T)] <- "81"
+  scenes$bands[grep("(?=.*8)(?=.*2)", scenes$bands, perl = T)] <- "82"
+  scenes$bands[grep("(?=.*8)(?=.*3)", scenes$bands, perl = T)] <- "83"
+
+  return(scenes)
+}
+
+at_sensor_radiance <- function(params = extract_radiometric_params(meta_data),
+                               scene = extract_band_names("./tmp")[1,],
+                               na = 0){
+#TO DO: include here the possibility of just defining the band and use extract_band_names under the hood
+#TO DO: check in previous version of landsat what stand for NA (NPGS software)
+require(raster)
+if(is.numeric(params$band)) params$band <- as.character(params$band)
+# if(is.numeric(band)) band <- as.character(band)
+#TO DO: this is a repetition is possible to replace it with the radiometric coefficient function I did later
+extract_params <- function(what){params[params$band == scene$bands & params$var == what, "value"]}
+what <- c("LMAX", "LMIN", "QCALMAX", "QCALMIN")
+#TO CHECK:  the param names have to be consistent across metadata files
+p <- sapply(what, function(x) extract_params(x))
+#from chapter 11 of the landsat handbook
+convert_to_radiance <- function(x){
+  ((p["LMAX"] - p["LMIN"])/(p["QCALMAX"] - p["QCALMIN"])) * (x - p["QCALMIN"]) + p["LMIN"]
+}
+scene <- raster(scene$scenes)
+if(!is.null(na)) values(scene)[values(scene) == na] <- NA
+scene <- convert_to_radiance(scene)
+return(scene)
+}
+
+#TO DO: a way to just give scene path and bands without the use of scene as
+thermal_band <- function(scene, na){
+  require("landsat")#for the ESdist function
+  #TO DO: insert an arguments accepting sensor radiance scenes, to avoid recomputing
+  if(scene$bands != 6 & scene$bands != 61 & scene$band != 62) {
+    stop("Thermal band is number 6, here providing a different one")
+  }
+  thermal_scene <- raster(scene$scenes)
+  if(!is.null(na)) values(thermal_scene)[values(thermal_scene) == na] <- NA
+  values(thermal_scene) <- thermalband(values(thermal_scene), band = as.numeric(scene$bands))
+  thermal_scene
+}
+
+at_sensor_reflectance <- function(scene = extract_band_names("./tmp")[1,],
+                                  params = extract_radiometric_params(meta_data),
+                                  esun = read.csv("extraSolarAtmosphericConstants.csv"),
+                                  na = 0, meta_data){
+  rad_coef <- radiometric_coefficients(meta_data = meta_data, scene = scene)
+  require("landsat")#for the ESdist function
+  #TO DO: insert an arguments accepting sensor radiance scenes, to avoid recomputing
+  if(scene$bands == 6 | scene$bands == 61 | scene$band == 62) {
+    warning("Not possible to compute at sensor reflectance for band 6, thermal infrared, returning temperature in Kelvin degrees")
+    return(thermal_band(scene = scene, na = na))
+  }
+  radiance_scene <- at_sensor_radiance(scene = scene, params = params, na = na)
+  #TO DO: if you change header in esun this following line has to be modified
+  sat <- paste0("Landsat", rad_coef$sat)
+  #TO CHECK: that the way the satellite is called in the metadata is consistent, 
+  #or insert the possibility to give autonomous corrections
+  #TO DO: esun data have to be packaged in some way
+  date <- rad_coef$date
+  zenith_angle <- 90 - rad_coef$sunElevation * pi/180
+  if(scene$bands == 81 | scene$bands == 82 | scene$bands == 83) scene$bands <- 8
+  convert_to_reflectance <- function(x) (pi * (ESdist(date)**2) * x)/(esun[esun$band == scene$band, sat] * cos(zenith_angle))
+  reflectance_scene <- convert_to_reflectance(radiance_scene)
+  reflectance_scene
+}
+
+cloud_mask <- function(band1 = at_sensor_reflectance(scene = extract_band_names("./tmp")[1,],
+                                                           params = extract_radiometric_params(meta_data),
+                                                           esun = read.csv("extraSolarAtmosphericConstants.csv"),
+                                                           na = 0, md), 
+                             band6 = thermal_band(scene = extract_band_names("./tmp")[6,], na = 0),
+                             window = matrix(rep(1, 5 * 5), 5, 5), 
+                             level = 0.0014){
+  if(class(band1) != "RasterLayer" | class(band6) != "RasterLayer")
+  {stop("This function only works on RasterLayers")}
+  cloud_mask <- band1/band6 > level
+  cloud_mask <- focal(cloud_mask, window)
+  cloud_mask <- cloud_mask > 0
+  surface <- data.frame(zonal(cloud_mask, cloud_mask, "count"))
+  cloud_percentage <- surface[surface$zone == 1, "count"]/sum(surface$count) * 100
+  if(length(cloud_percentage) == 0) cloud_percentage <-  0
+  values(cloud_mask)[values(cloud_mask) == 0] <- NA
+  
+  list("cloud_proportion" = cloud_percentage, "cloud_mask" = cloud_mask)
+}
+#in this focal add padding and na.rm, or at least check for that
+
+#Atmospheric correction
+#TO DO!! ci vuole una colonna per la banda!
+radiometric_coefficients <- function(meta_data = meta_data, scene = extract_band_names("./tmp")[1,]){
+  require("stringr")
+  #TO DO: replace with this function in the previous functions for radiometric correction
+  #TO DO: eventually include sun elevation, and zenith, date
+  params <-  extract_radiometric_params(meta_data = meta_data)
+  extract_params <- function(what){params[params$band == scene$bands & params$var == what, "value"]}
+  what <- c("LMAX", "LMIN", "QCALMAX", "QCALMIN")
+  p <- sapply(c("LMAX", "LMIN", "QCALMAX", "QCALMIN"), function(x) extract_params(x))
+  Grescale <- ((p["LMAX"] - p["LMIN"])/(p["QCALMAX"] - p["QCALMIN"]))
+  Brescale <- p["LMIN"] - Grescale * p["QCALMIN"]
+  gain2 <- 1/Grescale
+  offset <- Brescale*-1/Grescale
+  #you can use grep here instead of this horrible if
+  sunElevation <- as.numeric(meta_data$PRODUCT_PARAMETERS[meta_data$PRODUCT_PARAMETERS$field == "SUN_ELEVATION", "value"])
+  if(length(sunElevation) == 0) sunElevation <- as.numeric(meta_data$IMAGE_ATTRIBUTES[meta_data$IMAGE_ATTRIBUTES$field == "SUN_ELEVATION", "value"])
+  sunAzimuth <- as.numeric(meta_data$PRODUCT_PARAMETERS[meta_data$PRODUCT_PARAMETERS$field == "SUN_AZIMUTH", "value"])
+  if(length(sunAzimuth) == 0) sunAzimuth <- as.numeric(meta_data$IMAGE_ATTRIBUTES[meta_data$IMAGE_ATTRIBUTES$field == "SUN_AZIMUTH", "value"])
+  date <- as.Date(meta_data$PRODUCT_METADATA[meta_data$PRODUCT_METADATA$field == "ACQUISITION_DATE", "value"],
+                  "%Y-%m-%d")
+  if(length(date) == 0)   date <- as.Date(meta_data$PRODUCT_METADATA[meta_data$PRODUCT_METADATA$field == "DATE_ACQUIRED", "value"],
+                                          "%Y-%m-%d")
+  sat <- as.numeric(str_extract(meta_data$PRODUCT_METADATA[meta_data$PRODUCT_METADATA$field == "SPACECRAFT_ID", "value"], "[[:digit:]]"))
+  data.frame("Grescale" = Grescale, "Brescale" = Brescale, "gain2" = gain2,
+             "offset" = offset, "sunElevation" = sunElevation, "sunAzimuth" = sunAzimuth,
+             "date" = date, 
+             "sat" = sat, row.names = NULL)
+}
+
+#this is a fork of the DOS function in the landsat package but an error have been 
+#corrected with the insertion of blue_gain, and remotion of gain[SHV.band], the 
+#NORM variable has been changed
+myDOS <- function (sat = 5, scattering.coef = c(-4, -2, -1, -0.7, -0.5), 
+                   SHV, SHV.band, gain, offset, Grescale, Brescale, sunelev, 
+                   edist, Esun, blackadjust = 0.01, blue_gain) {
+  if (sat == 5) 
+    bands <- data.frame(lmin = c(0.45, 0.52, 0.63, 0.76, 
+                                 1.55, 2.08), lmax = c(0.52, 0.6, 0.69, 0.9, 1.75, 
+                                                       2.35))
+  else if (sat == 7) 
+    bands <- data.frame(lmin = c(0.45, 0.52, 0.63, 0.77, 
+                                 1.55, 2.09), lmax = c(0.52, 0.6, 0.69, 0.9, 1.75, 
+                                                       2.35))
+  else stop("Unknown satellite.\n")
+  rownames(bands) <- c("band1", "band2", "band3", "band4", 
+                       "band5", "band7")
+  scattering.mean <- matrix(apply(bands, 1, mean), byrow = FALSE, 
+                            nrow = nrow(bands), ncol = length(scattering.coef))
+  rownames(scattering.mean) <- rownames(bands)
+  colnames(scattering.mean) <- paste("coef", scattering.coef, 
+                                     sep = "")
+  scattering.mean <- sweep(scattering.mean, 2, scattering.coef, 
+                           "^")
+  scattering.mean.pct <- sweep(scattering.mean, 2, apply(scattering.mean, 
+                                                         2, sum), "/")
+  scattering.approx <- matrix(NA, nrow = nrow(bands), ncol = length(scattering.coef))
+  rownames(scattering.approx) <- rownames(bands)
+  colnames(scattering.approx) <- paste("coef", scattering.coef, 
+                                       sep = "")
+  grain <- 1e-04
+  for (i in 1:nrow(bands)) {
+    thisband <- seq(bands[i, 1], bands[i, 2], by = grain)
+    for (j in 1:length(scattering.coef)) {
+      scattering.approx[i, j] <- mean(thisband^scattering.coef[j])
+    }
+  }
+  scattering.approx.pct <- sweep(scattering.approx, 2, apply(scattering.approx, 
+                                                             2, sum), "/")
+  corrband.mean <- scattering.mean[SHV.band, ]
+  corrband.mean <- sweep(scattering.mean, 2, corrband.mean, 
+                         "/")
+  corrband.approx <- scattering.approx[SHV.band, ]
+  corrband.approx <- sweep(scattering.approx, 2, corrband.approx, 
+                           "/")
+  if (missing(offset)) {
+    offset <- -1 * Brescale/Grescale
+    gain <- 1/Grescale
+  }
+  NORM <- blue_gain/gain
+  suntheta <- (90 - sunelev) * pi/180
+  suntheta <- cos(suntheta)
+  Eo <- Esun[SHV.band]/edist^2
+  SHV <- SHV - gain * blackadjust * Eo * suntheta/pi
+  SHV <- SHV - offset
+  DNfinal.mean <- SHV * corrband.mean
+  DNfinal.mean <- sweep(DNfinal.mean, 1, NORM, "*")
+  DNfinal.mean <- sweep(DNfinal.mean, 1, offset, "+")
+  DNfinal.approx <- SHV * corrband.approx
+  DNfinal.approx <- sweep(DNfinal.approx, 1, NORM, "*")
+  DNfinal.approx <- sweep(DNfinal.approx, 1, offset, "+")
+  list(DNfinal.mean = DNfinal.mean, DNfinal.approx = DNfinal.approx)
+}
+
+estimate_lhaze <- function(meta_data = meta_data, 
+                           blue_scene = extract_band_names("./tmp")[1,], 
+                           #npixel = 1000,
+                           esun = read.csv("extraSolarAtmosphericConstants.csv")){
+  require("raster")
+  require("landsat")
+  blue_gain <- radiometric_coefficients(meta_data = meta_data, scene = blue_scene)$gain2
+  blue_scene <- raster(blue_scene$scenes)
+  rad_coef <- radiometric_coefficients(meta_data = meta_data, scene = scene)
+  shv <- table(values(blue_scene))
+  #remove the 0 because of NA, this will cause problems in NPGS
+  #TO DO: remove NA in function of the processing software in metadata
+  shv <- shv[-1]
+  #shv <- min(as.numeric(names(shv)[shv > npixel])) #this is the method suggested in landsat package 
+  shv <- RStoolbox::estimateHaze(blue_scene)#i prefer what is implemented in shv
+  sat <- meta_data$PRODUCT_METADATA[meta_data$PRODUCT_METADATA$field == "SPACECRAFT_ID", "value"]
+  if(sat == "Landsat5") esun_dos <- esun[c(1:5,7), "Landsat5"] 
+  if(sat == "Landsat7") esun_dos <- esun[c(1:5, 7, 8), "Landsat7"]   
+  #TO DO!: check on RStoolbox l'uso di esun
+  #The DOS function in the landsat package is a shit
+  #TO DO!: reimplement this function in the landsat package there is an error in esun e fa anche cagare girarci intorno
+  #that function only works for using SHV band 1 as band
+  dos <- data.frame(myDOS(sat = rad_coef$sat, SHV = shv, SHV.band = 1,
+                        Grescale = rad_coef$Grescale, Brescale = rad_coef$Brescale, 
+                        sunelev = rad_coef$sunElevation, Esun =  esun_dos, 
+                        edist = ESdist(rad_coef$date), blue_gain = blue_gain)$DNfinal.mean)
+  names(dos) <- c("very_clear", "clear", "moderate", "hazy", "very_hazy")
+  if(shv <= 55) {lhaze <- dos[, "very_clear"]
+  } else 
+    if(shv >= 56 & shv <= 75) { lhaze <- dos["clear"]
+    } else 
+      if(shv >= 76 & shv <= 95)  { lhaze <- dos["moderate"]
+      } else 
+        if(shv >= 96 & shv <= 115) { lhaze <- dos["hazy"]
+        } else { lhaze <- dos["very_hazy"]
+        }
+  data.frame("bands" = row.names(dos), "lhaze" = lhaze, stringsAsFactors = FALSE)
+}
+
+radio_correct <- function(scene = extract_band_names("./tmp")[1,], lhaze, sat = "Landsat7", meta_data){
+  #TO DO:! this call to radiometric coefficient can be better done, when inserting a band in it
+  scene_raster <- raster(scene$scenes)
+  rad_coef <- radiometric_coefficients(meta_data = meta_data, scene = scene)
+  lhaze <- lhaze[lhaze$bands == paste0("band", scene$bands), "lhaze"]
+  values(scene_raster) <- radiocorr(data.frame(values(scene_raster)),
+                                    Grescale = rad_coef$Grescale,
+                                    Brescale = rad_coef$Brescale,
+                                    sunelev = rad_coef$sunElevation,
+                                    edist = ESdist(rad_coef$date),
+                                    Esun = esun[esun$band == scene$band, sat],
+                                    method = "DOS4", 
+                                    Lhaze = lhaze)
+  #TO DO the value have to be rescaled to be in a valid range (0,1), check the gain offset rescale in the
+  #radCor(), quick and dirty here
+  values(scene_raster)[values(scene_raster) < 0] <- 0
+  values(scene_raster)[values(scene_raster) > 1] <- 1
+  
+  scene_raster
+  
+  }
+
+#for topocorrection use RStoolbox
+RStoolbox::topCor(scene_raster, dem, solarAngles = c(rad_coef$sunAzimuth * pi/180, rad_coef$sunElevation * pi/180),
+                  method = "C")
+
+#filter the images according to the error (no more than 0.5 pixel per band)
+#filter clouds
+
+
+#According to the google cloud documentation:
+#These Landsat images are processed to Level 1, which means they are orthorectified,
+#map-projected images containing radiometrically-calibrated data.product_type
+
+# 
+#   tmp <- coregisterImages(raster(extract_band_names("./tmp")[2,]$scenes), raster(extract_band_names("./tmp")[1,]$scenes))
+#   tmp2 <- coregisterImages(raster(extract_band_names("./tmp")[3,]$scenes), raster(extract_band_names("./tmp")[1,]$scenes))
+#   
+#   tmp <- raster(extract_band_names("./tmp")[2,]$scenes)
+#   tmp2 <- raster(extract_band_names("./tmp")[3,]$scenes)
+#   tmp0 <- raster(extract_band_names("./tmp")[1,]$scenes)
+#   plotRGB(stack(tmp2, tmp, raster(extract_band_names("./tmp")[1,]$scenes)))
+# 
+# #this if for coregister two full images with several bands
+# tmp <- pifMatch(tmp, tmp0)
+
+
+

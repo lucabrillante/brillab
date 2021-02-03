@@ -1,0 +1,68 @@
+#' Descriptive statistics of the data set by Date, Treatment, Block
+#'
+#' This is a function to check the quality of the data during the acquisition season
+#'
+#' @param df 	data frame or tibble that contains the data. Ideally from our lab template
+#' @param y 	character (name) or number (index) for the column containing the variable of interest
+#' @param time_range can assume values NULL (default), when not filtering per date, or
+#' take one single value "2020-12-31", or an array of two values indicating the start and end
+#' c("2020-12-31", "2021-01-31"). The extremes of the range are included.
+#' @param what a string with values "Date", "Date-Treatment", "Date-Treatment-Block"
+#' @param date_col character (name) or number (index) for the column containing the Date variable. Default "Date".
+#' @param block_col character (name) or number (index) for the column containing the Blocking variable. Default "Block".
+#' @param treat_col character (name) or number (index) for the column containing the Treatment variable. Default "Treatment".
+#'
+#' @return
+#' @export
+data_check <- function(df,
+                       y = "SWP",
+                       time_range = NULL,
+                       what  = "Date-Treatment",
+                       date_col = "Date",
+                       block_col = "Block",
+                       treat_col = "Treatment",
+                       write_file = FALSE,
+                       file_name = "output.xlsx") {
+
+  require(dplyr)
+  require(writexl)
+
+  #assign standard names to the columns of the dataframe
+  df <- rename(df,
+               "y" = names(df[y]),
+               "Date" = names(df[date_col]),
+               "Block" = names(df[block_col]),
+               "Treatment" = names(df[treat_col]))
+
+  if (!is.null(time_range)) {
+    if (length(time_range) == 1) {
+      df <- df[df$Date == time_range[1], ]
+    } else {
+      df <- df[df$Date >= time_range[1] & df$Date <= time_range[2], ]
+    }
+  }
+
+  what <- match.arg(what, c("Date-Treatment", "Date", "Date-Treatment-Block"))
+  if (what == "Date") df <- df %>% group_by(Date)
+  if (what == "Date-Treatment") df <- df %>% group_by(Date, Treatment)
+  if (what == "Date-Treatment-Block") df <- df %>% group_by(Date, Treatment, Block)
+
+  df <- df %>% summarise(obs = length(y),
+                         nbr_null = sum(sapply(y, function(x) is.null(y))),
+                         nbr_na = sum(is.na(y)),
+                         min = min(y, na.rm = TRUE),
+                         max = max(y, na.rm = TRUE),
+                         range = abs(max) - abs(min),
+                         sum = sum(y, na.rm = TRUE),
+                         median = median(y, na.rm = TRUE),
+                         avg = mean(y, na.rm = TRUE),
+                         se = se(y, na.rm = TRUE),
+                         sd = sd(y, na.rm = TRUE),
+                         coef_var = (sd/avg)*100)
+
+  if (write_file) write_xlsx(df, file_name)
+
+  return(df)
+}
+
+

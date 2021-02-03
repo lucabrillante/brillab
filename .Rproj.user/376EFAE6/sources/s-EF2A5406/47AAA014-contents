@@ -1,0 +1,94 @@
+require("RStoolbox")
+require("landsat")
+require("raster")
+
+source("landsat_preprocessing.R")
+
+#unpack the files
+zone_shp <- shapefile("pasoShp/crestonRanchArea.shp")
+zone_shp <- spTransform(zone, CRS = "+proj=utm +zone=11 +datum=WGS84 +units=m +no_defs +ellps=WGS84 +towgs84=0,0,0")
+
+all_tar <- list.files("./paso42_selected_scenes/", full.names = TRUE)
+
+#this is not a function yet just a procedural script for a custom treatment
+#it treats the data and leave the original imaged untouched 
+preprocessing_landsat <- function(a_tar, dir = "./paso_trt", zone = zone_shp) {
+  untar(a_tar, exdir = "./tmp")
+  name_img <- strsplit(list.files("./tmp", pattern = ".TIF")[1], split = "_B")[[1]][1]
+  lsat_type <- check_lsat_type(meta_data = md)
+  georef_err <- pixel_georef_error(gcp = list.files("./tmp", "GCP", full.names = TRUE), val = 15)
+  
+  md <- read_lsat_metadata()
+  #chek that  images are L1T and error in georef is less than half of a pixel
+  if(lsat_type & !georef_err) {
+    scenes <- extract_band_names()
+    params <- extract_radiometric_params(md)  
+    sun <- radiometric_coefficients(md, scenes[1,])
+    
+    #thermal infrared
+    tir <- scenes[scenes$bands ==6 | scenes$bands == 61 | scenes$bands == 62,]
+    
+    scenes <- scenes[!(scenes$bands %in% tir$bands),]
+    #remove panchromatic
+    scenes <- scenes[scenes$bands != "8" & scenes$bands != "81" & scenes$bands != "82" & scenes$bands != "83", ]
+    
+    #transform tir in kelvin
+    tir <- stack(lapply(1:nrow(tir), function(x) thermal_band(tir[x,], na = 0)))
+    
+    #top of atmosphere images
+    scenes_toa <- stack(lapply(1:nrow(scenes), function(x) 
+      at_sensor_reflectance(data.frame(scenes[x,]), meta_data = md, params = params)))
+    
+    tir <- resample(tir, scenes_toa[[1]])
+    cloudmask <- cloud_mask(band1 = crop(scenes_toa[[1]], zone), band6 = crop(tir[[2]], zone))
+    
+    if(cloudmask$cloud_proportion < 20){
+      
+      cloudmask <- cloud_mask(band1 = scenes_toa[[1]], band6 = tir[[2]])
+      
+      lhaze <- estimate_lhaze(meta_data = md, blue_scene = scenes[1,], 
+                              esun = read.csv("extraSolarAtmosphericConstants.csv"))
+      
+      scenes_atsurf <- stack(lapply(1:nrow(scenes), function(x) 
+        radio_correct(scenes[x,], lhaze, sat = "Landsat7", meta_data = md)))
+      
+      values(scenes_atsurf)[values(cloudmask$cloud_mask)] <- NA
+      values(scenes_atsurf)[values(scenes_atsurf) == 0] <- NA
+      
+      dem <- raster("dem30m_1arcsec.tif")
+      dem <- resample(dem, scene_raster)
+      dem <- crop(dem, scene_raster)
+      scenes_topcorr <- RStoolbox::topCor(scenes_atsurf, dem, solarAngles = c(sun$sunAzimuth * pi/180, sun$sunElevation * pi/180),
+                                          method = "C")
+
+      out <- list("scenes_toa" = crop(scenes_toa, zone),
+                  "scenes_atsurf" = crop(scenes_atsurf, zone),
+                  "scenes_topcorr" = crop(scenes_topcorr, zone), 
+                  "meta" = md, 
+                  "gcp" = pixel_georef_error(gcp = list.files("./tmp", "GCP", full.names = TRUE), val = 15, return_gcp = T),
+                  "cloudmask" = cloudmask 
+                  )
+      
+      save(out, file = paste0(dir, "/", name_img, ".RData"), compress = "xz")
+      #system("rm -r tmp")
+    }
+  }
+  
+  data.frame("scene" = name_img, "clouds" = cloudmask$cloud_proportion,
+         "lsat_type" = lsat_type, "georef_err" = georef_err)
+}
+
+#inserisci georegistrazione
+treated <- lapply(all_tar[78], function(x) 
+  tryCatch(preprocessing_landsat(a_tar = x), error = function(e) NA))
+
+
+md <- readMeta("./tmp/L71042035_03520050522_MTL.txt")
+imgs <- stack(lapply(list.files("./tmp", ".TIF", full.names = TRUE)[1:4], function(x) raster(x)))
+plotRGB(imgs, b = 1, g = 2, r = 3)
+tmp <- radCor(img = imgs, metaData = readMeta("./tmp/LE70420352003201EDC01_MTL.txt"), method = "dos", darkProp = 0.1)
+
+rgdal::
+plotRGB()
+devtools::install_github("azvoleff/teamlucc")
+

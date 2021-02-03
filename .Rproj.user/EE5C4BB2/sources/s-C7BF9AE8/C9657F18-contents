@@ -1,0 +1,127 @@
+#install the google-cloud-sdk on linux
+#this call to the shell allows to download the list of landsat images available
+landsat_scenes <- function(directory_path = "~/Documents/landsat", download = TRUE) {
+require("data.table")
+#include something to check for the presence and date of the scene_list file, and
+#the presence of gsutil on the system
+if(download == TRUE) {
+  system(paste("gsutil cp -n gs://earthengine-public/landsat/scene_list.zip", directory_path))
+  unzip("~/Documents/landsat/scene_list.zip")
+  }
+fread("~/Documents/landsat/scene_list", sep = "/")
+}
+
+#should recompose the string from those columns to avoid repetitions
+select_landsat <- function(path = 42,
+                           row  = 35,
+                           sat = "L7",
+                           start_date = as.Date("2003-01-01"), 
+                           end_date = as.Date("2016-12-31"), 
+                           all = full_list, 
+                           remove_scene_list = TRUE) {
+  require("stringr")  
+  scenes <- data.frame("sat"  = factor(all[[5]]),
+                       "path" = all[[6]],
+                       "row"  = all[[7]], 
+                       "year" = str_sub(all[[8]], 10, 13),
+                       "doy"  = str_sub(all[[8]], 14, 16), 
+                       "scene" = all[[8]])
+  scenes$date <- as.Date(format(strptime(paste(scenes$year, scenes$doy), format="%Y %j"), 
+                                format="%Y-%m-%d")) 
+  
+  selected_scenes <- row.names(scenes[scenes$sat == sat & scenes$path == path & scenes$row == row & scenes$date >= start_date & scenes$date <= end_date,])
+  selected_scenes <- scenes[as.numeric(selected_scenes),]
+  
+  path <- paste0("000", path)
+  row <- paste0("000", row)
+  row <- str_sub(row, str_length(row)-2, str_length(row))
+  path <- str_sub(path, str_length(path)-2, str_length(path))
+  
+  selected_scenes <- paste0("gs://earthengine-public/landsat/", sat, "/", 
+                            path, "/", row, "/", selected_scenes$scene)
+  if(remove_scene_list) {
+    system("rm ./scene_list")
+    system("rm ./scene_list.zip")
+  }
+  
+  return(selected_scenes)
+}
+
+cp_single_scene <- function(scene_path, directory_path = "~/Documents/landsat"){
+  if(!dir.exists("./tmp")) dir.create("./tmp")
+  directory_path <- paste0(directory_path, "/tmp")
+  system(paste("gsutil cp -n", scene_path, directory_path))
+  untar(paste0(directory_path, "/", strsplit(scene_path, "/")[[1]][8]), exdir = "./tmp")
+  #add a function that check for presence of previous images and avoid to download twice
+}
+
+subsample_scenes <- function(scene_path, scene_mask, output_dir){
+  require("raster")#to crop
+  require("R.utils")#this package can be eventually changed with a call to gzip or gunzip at system level
+
+  scene <- strsplit(scene_path, "/")[[1]][8]
+  #for now it works for all bands in the landsat (eventually TO DO: remove all )
+  bands <- list.files(path = "./tmp", pattern = ".TIF")
+  
+  #to crop according to the scene mask
+  crop_scenes <- function(bands, directory_path = "./tmp/") {
+    require(raster)
+    lapply(bands, function(b) {
+      scene <- crop(raster(paste0(directory_path, b)), scene_mask)
+      writeRaster(scene, paste0(directory_path, b), format = "GTiff", overwrite = TRUE)
+    })}
+  crop_scenes(bands)
+  #remove original files to keep only selected light weight scenes
+  lapply(bands, function(b) system(paste0("rm ", "./tmp/", b)))
+  system(paste0("rm ", "./tmp/", scene))
+  system("rm ./tmp/README.GTF")
+#TO DO: the gap mask is not always present, pass this to a tryCatch or a if expression
+gap_masks <- list.files(path = "./tmp/gap_mask", pattern = str_split(bands[1], "_")[[1]][2])
+if(!dir.exists("./tmp/gm")) dir.create("./tmp/gm")
+lapply(gap_masks, function(gm) {
+  gunzip(file.path(".", "tmp", "gap_mask", gm), 
+         destname = paste0("./", "tmp/gm/", strsplit(gm, "\\.")[[1]][1], ".TIF"), 
+         remove = FALSE)
+})
+bands <- list.files(path = "./tmp/gm", pattern = ".TIF")
+#TO DO: include here a check for presence of gap mask before going on to avoid presence of empty gm folders
+crop_scenes(bands, directory_path = "./tmp/gm/")
+
+lapply(bands, function(b) system(paste0("rm ", "./tmp/gm/", b)))
+system("rm -r ./tmp/gap_mask")
+#change the name to all file to ensure that this function can be reused for files
+#that have already been cropped once using this function (it uses .TIF files to read the file list, etc.)
+system("cd ./tmp; rename 's/.tif/.TIF/' *.tif")
+system("cd ./tmp/gm; rename 's/.tif/.TIF/' *.tif")
+
+if(!dir.exists(paste0("./", output_dir))) dir.create(paste0("./", output_dir))
+scene <- str_split(scene, "\\.")[[1]][1]
+#reput the extracted files in the tmp dir in a tar archive, the * is to avoid nested directory in the archive
+system(paste0("cd tmp && tar -czf ", "../", output_dir, "/", scene, "_mod.tar.gz", " *")) 
+system("rm -r tmp")
+}
+#TO DO: change all the paste for paths and explicit paths with the function file.path(),
+#in general let it being platform independent using .Platform characteristics
+#shapefiles for cropping
+
+#import the scene mask and then reproject according to the extension of the landsat files to 
+#download
+require("raster")
+scene_mask <- shapefile("~/Documents/landsat/pasoShp/pasoRoblesAVA.shp")
+scene_mask <- spTransform(scene_mask, crs("+proj=utm +zone=11 +datum=WGS84 +units=m +no_defs +ellps=WGS84 +towgs84=0,0,0"))
+require("magrittr")
+
+paso_scenes <- landsat_scenes(download = TRUE) %>% select_landsat(all = .)
+lapply(paso_scenes, function(x) {
+    cp_single_scene(scene_path = x)
+    subsample_scenes(scene_path = x, scene_mask, output_dir = "paso42_selected_scenes")
+})
+
+scene_mask <- spTransform(scene_mask, crs("+proj=utm +zone=10 +datum=WGS84 +units=m +no_defs +ellps=WGS84 +towgs84=0,0,0"))
+paso_scenes43 <- landsat_scenes(download = TRUE) %>% select_landsat(path = 43, all = .)
+lapply(paso_scenes43[1:2], function(x) {
+  cp_single_scene(scene_path = x)
+  subsample_scenes(scene_path = x, scene_mask, output_dir = "paso43_selected_scenes")
+})
+
+#include something that allows to filter by the month within the years

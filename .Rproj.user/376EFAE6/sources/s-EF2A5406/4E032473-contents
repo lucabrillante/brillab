@@ -1,0 +1,6 @@
+tmp <- lm(Sepal.Width ~  Petal.Length, iris) %>%
+  coefficients()
+
+tmp <- lm(Sepal.Width ~  Petal.Length, iris) %>%
+  print() %>% 
+  coefficients()

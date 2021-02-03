@@ -1,0 +1,2 @@
+df <- read_swp("G:/My Drive/Documents/RProjects/lab_analysis/AVF_SaltStress.xlsx")
+swp_trend(df, time_range = "2020-01-01")

@@ -1,0 +1,17 @@
+df <- read_swp("G:/My Drive/Documents/RProjects/lab_analysis/AVF_SaltStress.xlsx")
+swp_trend(df, time_range = "2020-01-01")
+
+#this is a function to check the quality of the data using descriptive statistics print to a file
+
+
+
+  by(df, list(df$Date, df$Treatment, df$Block), function(x) stat.desc(x$SWP))
+  by(df, list(df$Date, df$Treatment), function(x) pastecs::stat.desc(x$SWP))
+
+data_check(df, mode = "Date", file_name = "Date.xlsx", write_file = TRUE)
+data_check(df, mode = "Date-Treatment", file_name = "Date_Treatment.xlsx", write_file = TRUE)
+data_check(df, mode = "Date-Treatment_Block", file_name = "Date_Treatment_Block.xlsx", write_file = TRUE)
+
+trend_anovas(df = df, time_range = c("2020-01-01", "2021-01-01"))
+
+rm(list = ls())

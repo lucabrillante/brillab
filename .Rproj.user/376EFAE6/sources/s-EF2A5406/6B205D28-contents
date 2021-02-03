@@ -1,0 +1,361 @@
+#AVF SALT STRESS DATA ANALYSIS
+#This will show how to use the brillab package to analyse the data in the AVF Salt Stress
+
+require(readxl) #this is needed to read our template file
+require(brillab)
+# General ----------------------------------------------------------------------
+#assign treatment level in the order that makes sense, otherwise is alphabetical
+#We want the control to be the first one.
+avf_ss_treatments <- c("CTRL", "100A", "50G", "100G", "200G", "100GC")
+analysis_time_range <- c("2020-01-01", "2020-12-31")
+
+#Stem water potential ----------------------------------------------------------
+#load the dataset in the sheet
+df <- read_xlsx("G:/My Drive/Documents/RProjects/lab_analysis/AVF_SaltStress.xlsx",
+                sheet = "S_SWP", na = "NA")
+#because we store swp values as positive and bars we want to change this
+df$SWP <- df$SWP * -0.1
+
+#make the plot
+trend_plot(df, time_range = c("2020-01-01","2020-12-31"),
+           plot_title = "Plant Water Status",
+           y_lab = "Stem Water Potential (MPa)",
+           treatment_level = avf_ss_treatments)
+#make the anovas
+by_group_anovas(SWP ~ Treatment + Block, df, treatment_level = avf_ss_treatments,
+                what = "all", time_range = analysis_time_range)
+
+df_sub <- df[df$Treatment %in% c("CTRL", "50G", "100G", "200G"),]
+df_sub2 <- df[df$Treatment %in% c("CTRL", "100A", "100G", "100GC"),]
+by_group_anovas(SWP ~ Treatment + Block,
+                df_sub,
+                treatment_level = avf_ss_treatments,
+                what = "summary",
+                time_range = analysis_time_range)
+
+#Yield ------------------------------------------------------------------------
+df <- read_xlsx("G:/My Drive/Documents/RProjects/lab_analysis/AVF_SaltStress.xlsx",
+                sheet = "S_Yield", na = "NA")
+#Yield per plant
+yield_plot <- bar_plot(df,
+                       time_range = analysis_time_range,
+                       y = "Net_Weight",
+                       plot_title = "Yield",
+                       y_lab = "Yield per plant (kg)",
+                       treatment_level = avf_ss_treatments)
+#cluster number
+cluster_number_plot <- bar_plot(df,
+                                time_range = analysis_time_range,
+                                y = "Cluster_count",
+                                plot_title = "Cluster number",
+                                y_lab = "Cluster number per plant",
+                                treatment_level = avf_ss_treatments)
+
+#average cluster weight in g per cluster
+df$cluster_weight <- df$Net_Weight/df$Cluster_count * 1000
+cluster_weight_plot <- bar_plot(df,
+                                time_range = analysis_time_range,
+                                y = "cluster_weight",
+                                plot_title = "Average cluster weight",
+                                y_lab = "Cluster weight (g)",
+                                treatment_level = avf_ss_treatments)
+
+Rmisc::multiplot(yield_plot, cluster_number_plot, cluster_weight_plot, cols = 3)
+
+by_group_anovas(Net_Weight ~ Treatment + Block, df, treatment_level = avf_ss_treatments,
+                what = "all", time_range = analysis_time_range)
+by_group_anovas(Cluster_count ~ Treatment + Block, df, treatment_level = avf_ss_treatments,
+                what = "summary", time_range = analysis_time_range)
+by_group_anovas(cluster_weight ~ Treatment + Block, df, treatment_level = avf_ss_treatments,
+                what = "all", time_range = analysis_time_range)
+
+
+df_sub <- df[df$Treatment %in% c("CTRL", "50G", "100G", "200G"),]
+df_sub2 <- df[df$Treatment %in% c("CTRL", "100A", "100G", "100GC"),]
+by_group_anovas(Net_Weight ~ Treatment + Block,
+                df_sub2,
+                treatment_level = avf_ss_treatments,
+                what = "all",
+                time_range = analysis_time_range)
+
+
+
+#GOOD: average cluster weight in the 200G anova is significantly different from the control in
+#the Dunnett test
+
+#Wet Chem ----------------------------------------------------------------------
+df <- read_xlsx("G:/My Drive/Documents/RProjects/lab_analysis/AVF_SaltStress.xlsx",
+                sheet = "S_Berry_wet_chem", na = "NA")
+berry_weight_plot <- trend_plot(df,
+                                time_range = analysis_time_range,
+                                y = "berry_weight",
+                                plot_title = "Average berry weight",
+                                y_lab = "berry weight (g)",
+                                treatment_level = avf_ss_treatments)
+
+by_group_anovas(berry_weight ~ Treatment + Block, df, treatment_level = avf_ss_treatments,
+                what = "all", time_range = analysis_time_range)
+
+#berry weight is not significantly different
+
+df <- read_xlsx("G:/My Drive/Documents/RProjects/lab_analysis/AVF_SaltStress.xlsx",
+                sheet = "S_Berry_wet_chem", na = "NA")
+brix_plot <- trend_plot(df,
+                        time_range = analysis_time_range,
+                        y = "Brix",
+                        plot_title = "Total soluble solids",
+                        y_lab = "Brix",
+                        treatment_level = avf_ss_treatments)
+
+by_group_anovas(Brix ~ Treatment + Block, df, treatment_level = avf_ss_treatments,
+                what = "all", time_range = analysis_time_range)
+
+#
+df <- read_xlsx("G:/My Drive/Documents/RProjects/lab_analysis/AVF_SaltStress.xlsx",
+                sheet = "S_Berry_wet_chem", na = "NA")
+pH_plot <- trend_plot(df,
+                        time_range = analysis_time_range,
+                        y = "pH",
+                        plot_title = "pH",
+                        y_lab = "pH",
+                        treatment_level = avf_ss_treatments)
+
+by_group_anovas(pH ~ Treatment + Block, df, treatment_level = avf_ss_treatments,
+                what = "all", time_range = analysis_time_range)
+
+#
+df <- read_xlsx("G:/My Drive/Documents/RProjects/lab_analysis/AVF_SaltStress.xlsx",
+                sheet = "S_Berry_wet_chem", na = "NA")
+TA_plot <- trend_plot(df,
+                      time_range = analysis_time_range,
+                      y = "TA",
+                      plot_title = "Titratable Acidity",
+                      y_lab = "g/L",
+                      treatment_level = avf_ss_treatments)
+
+by_group_anovas(TA ~ Treatment + Block, df, treatment_level = avf_ss_treatments,
+                what = "all", time_range = analysis_time_range)
+
+Rmisc::multiplot(brix_plot, berry_weight_plot, pH_plot, TA_plot, cols = 2)
+
+#Yield ------------------------------------------------------------------------
+df <- read_xlsx("G:/My Drive/Documents/RProjects/lab_analysis/AVF_SaltStress.xlsx",
+                sheet = "S_Yield_homogeneous_vines", na = "NA")
+#Yield per plant
+yield_plot <- bar_plot(df,
+                       time_range = analysis_time_range,
+                       y = "Net_Weight",
+                       plot_title = "Yield",
+                       y_lab = "Yield per plant (kg)",
+                       treatment_level = avf_ss_treatments)
+#cluster number
+cluster_number_plot <- bar_plot(df,
+                                time_range = analysis_time_range,
+                                y = "Cluster_count",
+                                plot_title = "Cluster number",
+                                y_lab = "Cluster number per plant",
+                                treatment_level = avf_ss_treatments)
+
+#average cluster weight in g per cluster
+df$cluster_weight <- df$Net_Weight/df$Cluster_count * 1000
+cluster_weight_plot <- bar_plot(df,
+                                time_range = analysis_time_range,
+                                y = "cluster_weight",
+                                plot_title = "Average cluster weight",
+                                y_lab = "Cluster weight (g)",
+                                treatment_level = avf_ss_treatments)
+
+Rmisc::multiplot(yield_plot, cluster_number_plot, cluster_weight_plot, cols = 3)
+
+by_group_anovas(Net_Weight ~ Treatment + Block, df, treatment_level = avf_ss_treatments,
+                what = "all", time_range = analysis_time_range)
+by_group_anovas(Cluster_count ~ Treatment + Block, df, treatment_level = avf_ss_treatments,
+                what = "all", time_range = analysis_time_range)
+by_group_anovas(cluster_weight ~ Treatment + Block, df, treatment_level = avf_ss_treatments,
+                what = "all", time_range = analysis_time_range)
+
+df <- read_xlsx("G:/My Drive/Documents/RProjects/lab_analysis/AVF_SaltStress.xlsx",
+                sheet = "S_Berry_wet_chem_homo_vines", na = "NA")
+brix_plot <- trend_plot(df,
+                        time_range = analysis_time_range,
+                        y = "Brix",
+                        plot_title = "Average berry weight",
+                        y_lab = "berry weight (g)",
+                        treatment_level = avf_ss_treatments)
+
+by_group_anovas(Brix ~ Treatment + Block, df, treatment_level = avf_ss_treatments,
+                what = "all", time_range = analysis_time_range)
+pH_plot <- trend_plot(df,
+                      time_range = analysis_time_range,
+                      y = "pH",
+                      plot_title = "Average berry weight",
+                      y_lab = "berry weight (g)",
+                      treatment_level = avf_ss_treatments)
+
+by_group_anovas(pH ~ Treatment + Block, df, treatment_level = avf_ss_treatments,
+                what = "all", time_range = analysis_time_range)
+
+TA_plot <- trend_plot(df,
+                      time_range = analysis_time_range,
+                      y = "TA",
+                      plot_title = "Average berry weight",
+                      y_lab = "berry weight (g)",
+                      treatment_level = avf_ss_treatments)
+
+by_group_anovas(TA ~ Treatment + Block, df, treatment_level = avf_ss_treatments,
+                what = "all", time_range = analysis_time_range)
+
+#Single ring infiltration ------------------------------------------------------
+df <- read_xlsx("G:/My Drive/Documents/RProjects/lab_analysis/AVF_SaltStress.xlsx",
+                sheet = "S_Single_Ring_Infiltration", na = "NA")
+df$Time <- 3/df$Time
+
+#df <- df %>% group_by(Date, Block, Treatment) %>% summarise(Time = mean(Time))
+bar_plot(df,
+         time_range = analysis_time_range,
+         y = "Time",
+         plot_title = "Single Ring Infiltration",
+         y_lab = "Infiltration time (l/min)",
+         treatment_level = avf_ss_treatments)
+
+by_group_anovas(Time ~ Treatment + Block, df, treatment_level = avf_ss_treatments,
+                what = "all", time_range = analysis_time_range)
+
+df <- df %>% group_by(Date, Block, Treatment) %>% summarize(Date = unique(Date), Time = mean(Time))
+df <- tidyr::pivot_wider(df, names_from = Date, values_from = Time)
+df$infiltration_change <- df$`2020-10-18` - df$`2020-07-16`
+df$Date <- "2020-10-18 - 2020-07-16"
+
+bar_plot(df,
+         time_range = analysis_time_range,
+         y = "infiltration_change",
+         plot_title = "Infiltration Change",
+         y_lab = "Infiltration time (l/min)",
+         treatment_level = avf_ss_treatments)
+
+by_group_anovas(infiltration_change ~ Treatment + Block, df,
+                treatment_level = avf_ss_treatments,
+                what = "all", time_range = analysis_time_range)
+df_sub <- df[df$Treatment %in% c("CTRL", "50G", "100G", "200G"),]
+df_sub2 <- df[df$Treatment %in% c("CTRL", "100A", "100G", "100GC"),]
+by_group_anovas(infiltration_change ~ Treatment + Block,
+                df_sub2,
+                treatment_level = avf_ss_treatments,
+                what = "summary",
+                time_range = analysis_time_range)
+#infiltration change penalizes 100A
+
+#licor data --------------------------------------------------------------------
+df <- read_xlsx("G:/My Drive/Documents/RProjects/lab_analysis/AVF_SaltStress_Main.xlsx",
+                sheet = "S_Licor", na = "NA")
+df <- df %>%  dplyr::select(Date:Treatment, E, A, Ca, Ci, gsw, TleafEB, VPDleaf)
+
+df$gsw <- df$gsw*1000 #licor expresses this in mol, bring this to mmol
+df$wuei <- df$A/df$gsw
+df$ci_ca <- df$Ci/df$Ca
+
+an_plot <- trend_plot(df, y = "A", plot_title = "Net Assimilation",
+           treatment_level = avf_ss_treatments, na_omit = FALSE, 
+           y_lab = exp_lib("an_lab_unit"))
+gs_plot <- trend_plot(df, y = "gsw", plot_title = "Stomatal conductance",
+           treatment_level = avf_ss_treatments, y_lab = exp_lib("gs_lab_unit"))
+wuei_plot <- trend_plot(df, y = "wuei", plot_title = "Intrinsic water use efficiency",
+           treatment_level = avf_ss_treatments, y_lab = exp_lib("wuei_lab_unit"))
+
+Rmisc::multiplot(an_plot, gs_plot, wuei_plot, cols = 3)
+
+trend_plot(df, y = "ci_ca", plot_title = "Ci/Ca",
+           treatment_level = avf_ss_treatments)
+
+by_group_anovas(A ~ Treatment + Block, df,
+                treatment_level = avf_ss_treatments,
+                what = "all", time_range = analysis_time_range)
+
+by_group_anovas(gsw ~ Treatment + Block, df,
+                treatment_level = avf_ss_treatments,
+                what = "all", time_range = analysis_time_range)
+
+by_group_anovas(wuei ~ Treatment + Block, df,
+                treatment_level = avf_ss_treatments,
+                what = "all", time_range = analysis_time_range)
+
+#intrinsic water use efficiency is worst when using the gypsum than in the control
+
+by_group_anovas(ci_ca ~ Treatment + Block, df,
+                treatment_level = avf_ss_treatments,
+                what = "all", time_range = analysis_time_range)
+
+ggplot(df, aes(A, gsw)) + geom_point(aes(color = Treatment)) +
+  geom_smooth(aes(color = Treatment, fill = Treatment)) +
+  scale_color_colorblind("wong", name = "Treatment") +
+  scale_fill_colorblind(Treatment = "wong")
+
+#water use efficiency related to yield
+df <-  df %>% group_by(Block, Treatment) %>%
+  summarise(A = mean(A, na.rm = T), gsw = mean(gsw, na.rm = T),
+            wuei = mean(wuei, na.rm = T))
+#there are errors in the 2020-08-11
+
+yield <- read_xlsx("G:/My Drive/Documents/RProjects/lab_analysis/AVF_SaltStress_Main.xlsx",
+                         sheet = "S_Yield", na = "NA")
+
+yield <- yield %>% group_by(Date, Block, Treatment) %>%
+  summarise(Net_Weight = mean(Net_Weight, na.rm = TRUE))
+
+yield <- yield[yield$Date > "2020-01-01", ]
+
+df <- left_join(df, yield[c("Block", "Treatment", "Net_Weight")])
+
+df$Date <- "2020"
+
+df$yield_wuei <- df$Net_Weight/df$wuei
+df$yield_gs <- df$Net_Weight/df$gsw
+df$yield_a <- df$Net_Weight/df$A
+
+bar_plot(y = "yield_wuei", df, group_col = "Date")
+bar_plot(y = "yield_gs", df, group_col = "Date")
+bar_plot(y = "yield_a", df, group_col = "Date")
+
+aov(yield_wuei ~ Treatment + Block, df) %>% summary
+aov(yield_gs ~ Treatment + Block, df) %>% summary
+aov(yield_a ~ Treatment + Block, df) %>% summary
+
+#now using the satellite imagery stuff
+
+
+#soil density
+df <- read_xlsx("G:/My Drive/Documents/RProjects/lab_analysis/AVF_SaltStress_Main.xlsx",
+                sheet = "D_Bulk_Density", na = "NA", skip = 1)
+names(df) <- make.names(names(df))
+#bring this to Kn/m3 from g/cc
+df$specific.gravity.of.the.dry.soil <- df$specific.gravity.of.the.dry.soil * 9.8067 
+bar_plot(y = "specific.gravity.of.the.dry.soil", df, 
+         group_col = "DATE", block_col = "BLOCK",
+         treat_col = "TREATMENT", treatment_level = avf_ss_treatments, 
+         y_lab = "unit weight of dry soil (Kn/m3)", 
+         plot_title = "Soil Density")
+
+head(df)
+by_group_anovas(specific.gravity.of.the.dry.soil ~ Treatment + BLOCK, df,
+                group_col = "DATE",
+                treat_col = "TREATMENT", 
+                treatment_level = avf_ss_treatments, 
+                what = "all")
+
+#
+df <- read_xlsx("G:/My Drive/Documents/RProjects/lab_analysis/AVF_SaltStress_Main.xlsx",
+                sheet = "D_Bulk_Density", na = "NA", skip = 1)
+names(df) <- make.names(names(df))
+#bring this to Kn/m3 from g/cc
+df$specific.gravity.of.the.dry.soil <- df$specific.gravity.of.the.dry.soil * 9.8067 
+bar_plot(y = "specific.gravity.of.the.dry.soil", df, 
+         group_col = "DATE", block_col = "BLOCK",
+         treat_col = "TREATMENT", treatment_level = avf_ss_treatments, 
+         y_lab = "unit weight of dry soil (Kn/m3)", 
+         plot_title = "Soil Density")
+
+by_group_anovas(specific.gravity.of.the.dry.soil ~ Treatment + BLOCK, df,
+                group_col = "DATE",
+                treat_col = "TREATMENT", 
+                treatment_level = avf_ss_treatments, 
+                what = "all")

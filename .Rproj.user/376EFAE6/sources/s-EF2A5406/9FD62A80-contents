@@ -1,0 +1,65 @@
+require("readxl")
+require("dplyr")
+require("ggplot2")
+require("agricolae")
+require("multcomp")
+capwords <- function(s, strict = FALSE) {
+  cap <- function(s) paste(toupper(substring(s, 1, 1)),
+                           {s <- substring(s, 2); if(strict) tolower(s) else s},
+                           sep = "", collapse = " " )
+  sapply(strsplit(s, split = " "), cap, USE.NAMES = !is.null(names(s)))
+}
+
+df <- read_xlsx("DATA MEALY BUG.xlsx", sheet = 2, na = "N/A")
+df <- df[1:7]
+names(df) <- capwords(tolower(names(df)))
+df$Date <- as.Date(df$Date, "%Y-%m-%d")
+
+df$Treatment <- recode(df$Treatment, PURPLE = "Ag DE-Cide",
+                       RED = "Azaguard", BLUE = "Ctrl",
+                       OR = "Grandevo", PINK = "Pyganic") 
+df$Treatment <- factor(df$Treatment, levels = c("Ctrl", "Ag DE-Cide",
+                                                "Azaguard", "Grandevo",
+                                                "Pyganic"))
+
+#Dunnet respect to the control
+
+### DATE 1
+mod1 <- aov(Brix~Treatment + Block, data = df[df$Date == unique(df$Date)[1],]) 
+mod1 %>% summary
+HSD.test(mod1, "Treatment", group = TRUE, console = TRUE)
+dunnet <- glht(mod1, linfct = mcp(Treatment = "Dunnett"))
+summary(dunnet)
+
+### DATE 2
+mod1 <- aov(Brix~Treatment + Block, data = df[df$Date == unique(df$Date)[2],]) 
+mod1 %>% summary
+agricolae::HSD.test(mod1, "Treatment", group = TRUE, console = TRUE)
+dunnet <- glht(mod1, linfct = mcp(Treatment = "Dunnett"))
+summary(dunnet)
+
+### DATE 3
+mod1 <- aov(Brix~Treatment + Block, data = df[df$Date == unique(df$Date)[3],]) 
+mod1 %>% summary
+ agricolae::HSD.test(mod1, "Treatment", group = TRUE, console = TRUE)
+ dunnet <- glht(mod1, linfct = mcp(Treatment = "Dunnett"))
+ summary(dunnet)
+
+df <- df %>% 
+  group_by(Treatment, Date) %>% 
+  summarise(brix = mean(Brix, na.rm = TRUE), brix_se = plotrix::std.error(Brix))
+df$brix_min <- df$brix - df$brix_se
+df$brix_max <- df$brix + df$brix_se
+
+ggplot(df, aes(Date, brix)) + 
+  geom_ribbon(aes(ymin = brix_min, ymax = brix_max, fill = Treatment), alpha = 0.15) +
+  geom_line(aes(color = Treatment), size = 2) +
+  geom_point(aes(shape = Treatment, color = Treatment, fill = Treatment), size = 5) +
+  ggtitle("Brix Madera-Mealyganic 2020") +
+  ylab("Brix") +
+  scale_color_brewer(palette = "Set2") + 
+  scale_fill_brewer(palette = "Set2") +
+  theme_bw() +
+  theme(text = element_text(size = 24))
+
+

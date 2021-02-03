@@ -1,0 +1,73 @@
+#This function performs anova statistics for trend plots
+#and later on it provides two kinds of multiple comparison tests
+#Dunnet against the control and Tukey HSD
+#Function iterates across all dates in the dataset as limited by the time_range argument
+
+
+#Dunnet respect to the control
+
+trend_anovas <- function(formula = SWP ~ Treatment + Block, df,
+                         date_col = "Date", treat_col = "Treatment",
+                         time_range = "all", treatment_level = NULL,
+                         what = "summary", return_models = FALSE) {
+  #TO DO: code will be easier to maintain if this preliminary section which is
+  #similar to many other function in the package goes to an internal function, so
+  #to avoid repetitions
+  require(dplyr)
+  require(agricolae)
+  require(multcomp)
+
+  df <- rename(df,
+               "Date" = names(df[date_col]),
+               "Treatment" = names(df[treat_col]))
+
+  if (time_range[1] != "all") {
+    if (length(time_range) == 1) {
+      df <- df[df$Date == time_range[1], ]
+    } else {
+      df <- df[df$Date >= time_range[1] & df$Date <= time_range[2], ]
+    }
+  }
+
+  if (!is.null(treatment_level))
+    df$Treatment <- factor(df$Treatment, levels = treatment_level)
+  df$Treatment <- as.factor(df$Treatment)
+
+  #actual fuction core -----
+  models <- lapply(unique(df$Date), function(x)
+    mod1 <- aov(formula, data = df[df$Date == x, ]))
+  names(models) <- paste0("--------   ", unique(df$Date), "   --------")
+
+  if(what == "summary" | what == "all") {
+    cat("\n\n\n\n\t\t\tANOVA\n\n\n\n")
+    print(lapply(models, summary))
+    }
+
+  if(what == "tukey" | what == "all"){
+    cat("\n\n\n\n\t\t\tTUKEYS\n\n\n\n")
+    print(lapply(models, summary))
+    tukeys <- sapply(names(models), function(x){
+      cat(" -----------------------------------------------------------------------",
+          paste0("\n\t\t  "),
+          x,
+          "\n",
+          "-----------------------------------------------------------------------")
+      tukey <- HSD.test(models[[x]], "Treatment",
+                        group = TRUE, console = TRUE)})
+  }
+
+  if(what == "dunnett" | what == "all") {
+    cat("\n\n\n\n\t\t\tDUNNETT\n\n\n\n")
+    lapply(names(models), function(x){
+      cat(" -----------------------------------------------------------------------",
+          paste0("\n\t\t  "),
+          x,
+          "\n",
+          "-----------------------------------------------------------------------")
+      dunnet <- glht(models[[x]], linfct = mcp(Treatment = "Dunnett"))
+      print(summary(dunnet))
+    })
+  }
+
+  if(return_models == TRUE) return(models)
+}

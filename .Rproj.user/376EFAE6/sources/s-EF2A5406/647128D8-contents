@@ -1,0 +1,89 @@
+
+# creston <- shapefile("pasoShp/CrestonRanch.shp")
+# 
+# aspect <- raster("../yieldForecastPaso/data/earth/aspectCrestonRanch.tif")
+# saga  <- raster("../yieldForecastPaso/data/earth/sagaTWICrestonRanch.tif")
+# slope <- raster("../yieldForecastPaso/data/earth/slopeCrestonRanch.tif")
+# #add illumination
+# #
+# terrain <- data.frame("aspect" = extract(aspect, creston, fun = mean), 
+#                       "slope" = extract(slope, creston, fun = mean), 
+#                       "saga" = extract(saga, creston, fun = mean))
+# 
+# terrain$bloc <- paste0(creston$Block, "_", creston$Variety, "_", creston$Clone)
+# 
+# write.csv(terrain, "../yieldForecastPaso/data/earth/terrain.csv", row.names = FALSE)
+terrain <- read.csv("../yieldForecastPaso/data/earth/terrain.csv")
+
+meteo_sp <- read.csv("../yieldForecastPaso/data/climate/cimisSpatial.csv")
+meteo <- read.csv("../yieldForecastPaso/data/climate/hourlyWeatherAtascaderoStation.csv")
+
+require("lubridate")
+require("dplyr")
+
+#TO DO: rewrite it concisely
+meteo_sp$Date <- as.Date(meteo_sp$Date, format = "%m/%d/%Y")
+meteo_sp$year <- year(meteo_sp$Date)
+meteo_sp$month <- month(meteo_sp$Date)
+meteo_sp$day <- day(meteo_sp$Date)
+
+meteo$Date <- as.Date(meteo$Date, format = "%m/%d/%Y")
+meteo$year <- year(meteo$Date)
+meteo$month <- month(meteo$Date)
+#meteo$day <- day(meteo$Date)
+
+meteo <- select(meteo, -contains("qc"))
+meteo <- meteo[7:ncol(meteo)]
+names(meteo) <- c("et0", "rain", "sun_rad", "vpd", "temp", "rel_h", "dew_p", "wind_speed", 
+                  "wind_dir", "soil_temp", "year", "month")
+#for now use the months, the use of days is also possible, but would require
+#a daily retraining
+tmp <- meteo[(names(meteo) != "rain")] %>% group_by(year, month) %>% summarise_all(function(x) mean(x, na.rm = T))
+rain <- meteo[c("year", "month", "rain")] %>% group_by(year, month) %>% 
+  summarise_all(function(x) sum(x, na.rm = T))
+#TO DO!: download hour data, because temp is the mean, in this file (not possible to 
+#have max and min)
+
+meteo_month <- inner_join(tmp, rain, by = c("year", "month"))
+meteo_month <- meteo_month[1:nrow(meteo_month)-1,]
+require("caret")
+preproc <- preProcess(meteo_month, method = "bagImpute")
+meteo_month <- predict(preproc, meteo_month)
+# View(meteo_month)
+# #pass this to a function to unscale and uncenter
+# meteo_month <- lapply(1:12, function(x) meteo_month[x] * preproc$std[x] + preproc$mean[x])
+# meteo_month <- do.call(cbind, meteo_month)
+meteo_month <- meteo_month[!names(meteo_month) == "soil_temp"]
+
+soil <- shapefile("../yieldForecastPaso/data/earth/JLohrCrestonRanchPasoRobles_SSURGO_aoi_2017-03-06_14-50-35/JLohrCrestonRanchPasoRobles_SSURGO_aoi_2017-03-06_14-50-35/spatial/soilmu_a_aoi.shp")
+soil <- spTransform(soil, crs(creston))
+soil <- crop(soil, creston)
+soil <- read.csv("../yieldForecastPaso/data/earth/soil_usda_table.csv")
+
+soil$horiz_min <- as.numeric(str_split(soil$Horizon.Depth.Range, "-", simplify = T)[,1])
+soil$horiz_max <- as.numeric(str_split(soil$Horizon.Depth.Range, "-", simplify = T)[,2])
+soil$clay_min <- as.numeric(str_split(soil$Total.Clay.Range, "-", simplify = T)[,1])
+soil$clay_max <- as.numeric(str_split(soil$Total.Clay.Range, "-", simplify = T)[,2])
+soil$density_min <- as.numeric(str_split(soil$Moist.Bulk.Density.Range, "-", simplify = T)[,1])
+soil$density_max <- as.numeric(str_split(soil$Moist.Bulk.Density.Range, "-", simplify = T)[,2])
+soil$ksat_min <- as.numeric(str_split(soil$Ksat.Range, "-", simplify = T)[,1])
+soil$ksat_max <- as.numeric(str_split(soil$Ksat.Range, "-", simplify = T)[,2])
+soil$awc_min <- as.numeric(str_split(soil$AWC.Range, "-", simplify = T)[,1])
+soil$awc_max <- as.numeric(str_split(soil$AWC.Range, "-", simplify = T)[,2])
+soil$texture <- soil$TexturesString
+soil$cec_min <- as.numeric(str_split(soil$Effective.Cation.Exchange.Capacity.Range, "-", simplify = T)[,1])
+soil$cec_max <- as.numeric(str_split(soil$Effective.Cation.Exchange.Capacity.Range, "-", simplify = T)[,2])
+
+names(soil)
+soil4model <- soil[c(1:3, 33:45)]
+write.csv(soil4model, "../yieldForecastPaso/data/earth/soil4model.csv", row.names = F)
+soil <- read.csv("../yieldForecastPaso/data/earth/soil4model.csv")
+field <- read.csv("../yieldForecastPaso/data/field/Creston.csv")
+head(field)
+
+#budburst to(march 15)
+#
+#
+#2 possibilita o si predice ogni variabile temporale con facebook forecast
+
+

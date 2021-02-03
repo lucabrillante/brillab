@@ -1,0 +1,24 @@
+{
+    "id": "6B205D28",
+    "path": "G:/My Drive/Documents/RProjects/lab_analysis/example.R",
+    "project_path": null,
+    "type": "r_source",
+    "hash": "0",
+    "contents": "",
+    "dirty": true,
+    "created": 1610843107901.0,
+    "source_on_save": false,
+    "relative_order": 5,
+    "properties": {
+        "cursorPosition": "263,0",
+        "scrollLine": "211"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1610911352,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1611001913823,
+    "read_only": false,
+    "read_only_alternatives": []
+}

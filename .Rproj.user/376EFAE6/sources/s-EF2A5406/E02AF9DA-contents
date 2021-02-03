@@ -1,0 +1,5 @@
+require("RStoolbox")
+require("raster")
+
+#here we use landsat 8 Collection 2 level 2 which are surface reflectance data 
+read_lsat_metadata("C:/Users/lucabrillante/Downloads/LC08_L2SP_042035_20200827_20200906_02_T1", pattern = "_MTL.t")

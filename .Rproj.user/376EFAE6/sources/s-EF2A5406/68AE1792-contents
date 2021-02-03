@@ -1,0 +1,73 @@
+#This is a script to create plots for water potentials, but can be adapted and applied to other trend graphs as well
+require("ggplot2")
+require("readxl")
+require("dplyr")
+require("plotrix")
+require("magrittr")
+require("multcomp")
+#If you get this error:
+# Loading required package: I_do_not_have_a_package
+# Warning message:
+#   In library(package, lib.loc = lib.loc, character.only = TRUE, logical.return = TRUE,  :
+#                there is no package called ‘I_do_not_have_a_package’
+#
+#Install the packages you are missing with install.package("...") 
+#where ... is name of package
+source("G:/Shared drives/Brillante Lab/homeR/anova_functions.R")
+#INSERT HERE the path to the file that  you would like to work on
+file_path <- ("G:/Shared drives/Brillante Lab/AVF_Salt_Stress/Swp.xlsx")
+
+comparisons <- function(equ, dataset) {
+  equ <- as.formula(equ)
+  mod <- lm(equ, data = dataset)
+  tmp <- summary(glht(mod, linfct = mcp(Treatment =  "Tukey")))
+  output <- data.frame("contrast"  = names(tmp$test$coefficients), 
+                       "estimate" =  tmp$test$coefficients, 
+                       "pvalue" = tmp$test$pvalues, 
+                       "logic" = tmp$test$pvalues <= 0.05,
+                       row.names = NULL)
+  return(output)
+}
+
+df <- read_xlsx("G:/Shared drives/Brillante Lab/AVF_Salt_Stress/Swp.xlsx",
+                na = "NA")
+df$Date <- as.Date(df$Date, "%Y-%m-%d")
+df$Swp <- df$Swp * -0.1
+df_2020 <- df[df$Date > "2020-01-01", ]
+df_2020$Treatment <- factor(df_2020$Treatment, levels = c("CTRL", "50G", "100G", "200G", "100GC", "100A"))
+#df_2020 <- df_2020[df_2020$Treatment == "CTRL" | df_2020$Treatment == "100A" | df_2020$Treatment == "100G",]
+df_2020 <- as.data.frame(df_2020)
+significant <- sign_anova(df_2020, "Swp ~ Treatment", date_col = "Date")
+make_comps(data = significant, equ = "Swp ~ Treatment", date_col = "Date")
+
+df_2020 %<>%
+  group_by(Date, Row, Treatment) %>%
+  summarize(Swp = mean(Swp), Treatment = unique(Treatment))
+
+sign_anova(df_2020, "Swp ~ Treatment", date_col = "Date")
+
+names(df_2020)[1] <- "Date"
+df_2020 <- df_2020 %>% 
+  group_by(Treatment, Date) %>% 
+  summarise(swp = mean(Swp, na.rm = TRUE), swp_se = std.error(Swp))
+#ribbon is standard error of the mean
+
+df_2020$swp_min <- df_2020$swp - df_2020$swp_se
+df_2020$swp_max <- df_2020$swp + df_2020$swp_se
+
+
+png(width = 1000, height = 651, type = "windows")
+
+ggplot(df_2020, aes(Date, swp)) + 
+  geom_ribbon(aes(ymin = swp_min, ymax = swp_max, fill = Treatment), alpha = 0.15) +
+  geom_line(aes(color = Treatment), size = 2) +
+  geom_point(aes(shape = Treatment, color = Treatment, fill = Treatment), size = 5) +
+  ggtitle("SWP Bakersfield 2020") +
+  ylab("Stem Water Potential (MPa)") +
+  scale_color_brewer(palette = "Set2") + 
+  scale_fill_brewer(palette = "Set2") +
+  theme_bw() +
+  theme(text = element_text(size = 24))
+
+dev.off()
+
